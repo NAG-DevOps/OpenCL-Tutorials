@@ -1,7 +1,17 @@
+/**
+ * @Author: GeorgeRaven <archer>
+ * @Date:   2020-02-24T17:47:58+00:00
+ * @Last modified by:   archer
+ * @Last modified time: 2020-02-24T17:57:21+00:00
+ * @License: please see LICENSE file in project root
+ */
+
+
+
 #include <iostream>
 #include <vector>
 
-#include "Utils.h"
+#include "utils.h"
 
 void print_help() {
 	std::cerr << "Application usage:" << std::endl;
@@ -21,7 +31,7 @@ int main(int argc, char **argv) {
 		if ((strcmp(argv[i], "-p") == 0) && (i < (argc - 1))) { platform_id = atoi(argv[++i]); }
 		else if ((strcmp(argv[i], "-d") == 0) && (i < (argc - 1))) { device_id = atoi(argv[++i]); }
 		else if (strcmp(argv[i], "-l") == 0) { std::cout << ListPlatformsDevices() << std::endl; }
-		else if (strcmp(argv[i], "-h") == 0) { print_help(); return 0; }
+		else if (strcmp(argv[i], "-h") == 0) { print_help(); return 0;}
 	}
 
 	//detect any potential exceptions
@@ -54,42 +64,60 @@ int main(int argc, char **argv) {
 			throw err;
 		}
 
+		typedef int mytype;
+
 		//Part 3 - memory allocation
 		//host - input
-		std::vector<int> A = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 }; //C++11 allows this type of initialisation
-		std::vector<int> B = { 0, 1, 2, 0, 1, 2, 0, 1, 2, 0 };
-		
-		size_t vector_elements = A.size();//number of elements
-		size_t vector_size = A.size()*sizeof(int);//size in bytes
+		std::vector<mytype> A(10, 1);//allocate 10 elements with an initial value 1 - their sum is 10 so it should be easy to check the results!
+
+		//the following part adjusts the length of the input vector so it can be run for a specific workgroup size
+		//if the total input length is divisible by the workgroup size
+		//this makes the code more efficient
+		size_t local_size = 10;
+
+		size_t padding_size = A.size() % local_size;
+
+		//if the input vector is not a multiple of the local_size
+		//insert additional neutral elements (0 for addition) so that the total will not be affected
+		if (padding_size) {
+			//create an extra vector with neutral values
+			std::vector<int> A_ext(local_size-padding_size, 0);
+			//append that extra vector to our input
+			A.insert(A.end(), A_ext.begin(), A_ext.end());
+		}
+
+		size_t input_elements = A.size();//number of input elements
+		size_t input_size = A.size()*sizeof(mytype);//size in bytes
+		size_t nr_groups = input_elements / local_size;
 
 		//host - output
-		std::vector<int> C(vector_elements);
+		std::vector<mytype> B(input_elements);
+		size_t output_size = B.size()*sizeof(mytype);//size in bytes
 
 		//device - buffers
-		cl::Buffer buffer_A(context, CL_MEM_READ_WRITE, vector_size);
-		cl::Buffer buffer_B(context, CL_MEM_READ_WRITE, vector_size);
-		cl::Buffer buffer_C(context, CL_MEM_READ_WRITE, vector_size);
+		cl::Buffer buffer_A(context, CL_MEM_READ_ONLY, input_size);
+		cl::Buffer buffer_B(context, CL_MEM_READ_WRITE, output_size);
 
 		//Part 4 - device operations
 
-		//4.1 Copy arrays A and B to device memory
-		queue.enqueueWriteBuffer(buffer_A, CL_TRUE, 0, vector_size, &A[0]);
-		queue.enqueueWriteBuffer(buffer_B, CL_TRUE, 0, vector_size, &B[0]);
+		//4.1 copy array A to and initialise other arrays on device memory
+		queue.enqueueWriteBuffer(buffer_A, CL_TRUE, 0, input_size, &A[0]);
+		queue.enqueueFillBuffer(buffer_B, 0, 0, output_size);//zero B buffer on device memory
 
-		//4.2 Setup and execute the kernel (i.e. device code)
-		cl::Kernel kernel_add = cl::Kernel(program, "add");
-		kernel_add.setArg(0, buffer_A);
-		kernel_add.setArg(1, buffer_B);
-		kernel_add.setArg(2, buffer_C);
+		//4.2 Setup and execute all kernels (i.e. device code)
+		cl::Kernel kernel_1 = cl::Kernel(program, "reduce_add_1");
+		kernel_1.setArg(0, buffer_A);
+		kernel_1.setArg(1, buffer_B);
+//		kernel_1.setArg(2, cl::Local(local_size*sizeof(mytype)));//local memory size
 
-		queue.enqueueNDRangeKernel(kernel_add, cl::NullRange, cl::NDRange(vector_elements), cl::NullRange);
+		//call all kernels in a sequence
+		queue.enqueueNDRangeKernel(kernel_1, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size));
 
 		//4.3 Copy the result from device to host
-		queue.enqueueReadBuffer(buffer_C, CL_TRUE, 0, vector_size, &C[0]);
+		queue.enqueueReadBuffer(buffer_B, CL_TRUE, 0, output_size, &B[0]);
 
 		std::cout << "A = " << A << std::endl;
 		std::cout << "B = " << B << std::endl;
-		std::cout << "C = " << C << std::endl;
 	}
 	catch (cl::Error err) {
 		std::cerr << "ERROR: " << err.what() << ", " << getErrorString(err.err()) << std::endl;
