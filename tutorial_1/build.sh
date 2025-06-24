@@ -23,10 +23,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+CMAKE_OPTS=""
+
+if [[ $# -ge 1 ]]; then
+  CMAKE_OPTS="$1"
+fi
+
 rm -r build/
 mkdir -p build
 cd build/
-cmake ..
+cmake .. $CMAKE_OPTS
 make
 ./tut1
 cd ..
